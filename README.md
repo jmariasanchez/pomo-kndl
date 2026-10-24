@@ -1,6 +1,6 @@
 # pomo-kndl
 
-Status: first build. The CLI, sync engine, and Kindle app run and are tested on macOS. Not yet cross-compiled or run on the Kindle.
+Status: first build. The CLI, sync engine, and Kindle app are tested on macOS. Kindle binaries are cross-compiled and installed but not yet confirmed running on the device.
 
 A quiet Kindle focus timer driven by a portable Rust CLI. The computer is the airport: it holds the authoritative state and runs operations. The Kindle is the airplane: it departs with a flight plan, works on its own while disconnected, and lands with a flight log that the computer reconciles.
 
@@ -28,7 +28,7 @@ POMO_KNDL_DIR=/path/with/pairing.json ./build/pomo-kndl-gui
 ./tests/e2e.sh
 ```
 
-Kindle install (not yet verified on device): cross-compile with an armhf Kindle toolchain (`make -C kindle package CROSS=... SYSROOT=...`), copy `dist/pomo-kndl/` to `/mnt/us/extensions/`, add `pairing.json` to that folder over USB, then open pomo-kndl from KUAL. The device must provide or bundle GTK 2 and OpenSSL libraries (`lib/` in the extension folder is on the library path).
+Kindle install: run `kindle/cross.sh` with the Kindle mounted. It cross-compiles armhf binaries with zig against Debian 9 headers, targets glibc 2.17, and links the firmware's GTK 2 and KOReader's LibreSSL at run time. Copy `kindle/dist/pomo-kndl/` to `/mnt/us/extensions/`, write `pairing.json` there with `pomo-kndl pair --host <ip> --out /Volumes/Kindle/extensions/pomo-kndl/pairing.json`, eject, then open pomo-kndl from KUAL. The KUAL menu also has "Sync now" (headless) and "Diagnose", which writes `diagnose.txt` (libraries, boot id, network) for debugging over USB.
 
 The wire format is in [PROTOCOL.md](PROTOCOL.md).
 

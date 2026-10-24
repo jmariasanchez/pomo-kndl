@@ -9,12 +9,19 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
 namespace pk {
+
+// The Kindle links against KOReader's LibreSSL, built with OpenSSL 1.0 headers. Use only
+// symbols both it and OpenSSL 3 provide.
+#if !defined(SSL_CTX_set_min_proto_version)
+extern "C" int SSL_CTX_set_min_proto_version(SSL_CTX*, uint16_t);
+#endif
 
 static std::string ssl_err(const char* what) {
     char buf[256];
@@ -65,9 +72,10 @@ nlohmann::json tls_exchange(const nlohmann::json& p, const nlohmann::json& req, 
     const std::string host = p.at("host"), pin = p.at("server_sha256");
     const int port = p.value("port", 7419);
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> ctx(SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> ctx(SSL_CTX_new(SSLv23_client_method()), SSL_CTX_free);
     if (!ctx) throw std::runtime_error(ssl_err("SSL_CTX_new"));
-    SSL_CTX_set_min_proto_version(ctx.get(), TLS1_2_VERSION);
+    if (SSL_CTX_set_min_proto_version(ctx.get(), TLS1_2_VERSION) != 1)
+        throw std::runtime_error("TLS 1.2 not supported by this SSL library");
     // Trust comes from the pin, not a CA. Chain checks are replaced by the exact match below.
     SSL_CTX_set_verify(ctx.get(), SSL_VERIFY_NONE, nullptr);
 
@@ -78,7 +86,8 @@ nlohmann::json tls_exchange(const nlohmann::json& p, const nlohmann::json& req, 
     SSL_set_tlsext_host_name(ssl.get(), "pomo-kndl");
     if (SSL_connect(ssl.get()) != 1) throw std::runtime_error(ssl_err("TLS handshake failed"));
 
-    X509* cert = SSL_get1_peer_certificate(ssl.get());
+    // OpenSSL 3 maps this to SSL_get1_peer_certificate; both return a reference we free.
+    X509* cert = SSL_get_peer_certificate(ssl.get());
     if (!cert) throw std::runtime_error("server sent no certificate");
     std::string got = cert_sha256(cert);
     X509_free(cert);
