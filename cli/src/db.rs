@@ -61,16 +61,32 @@ CREATE TABLE IF NOT EXISTS conflicts (
 impl Db {
     pub fn open(path: &Path) -> Result<Db> {
         let conn = Connection::open(path)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
+        // CLI commands and a running `serve` share this file: wait instead of failing.
+        conn.busy_timeout(std::time::Duration::from_secs(10))?;
+        // journal_mode=WAL needs a brief exclusive lock on first creation; busy_timeout
+        // does not cover it, so retry.
+        let mut tries = 0;
+        loop {
+            match conn.pragma_update(None, "journal_mode", "WAL") {
+                Ok(()) => break,
+                Err(_) if tries < 100 => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
         conn.pragma_update(None, "synchronous", "FULL")?;
-        conn.execute_batch(SCHEMA)?;
-        let db = Db { conn };
+        let mut db = Db { conn };
+        let tx = db.tx()?;
+        tx.execute_batch(SCHEMA)?;
         for (k, v) in [("plan_version", "0"), ("focus_min", "25"), ("break_min", "5")] {
-            db.conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO meta(key,val) VALUES(?1,?2)",
                 params![k, v],
             )?;
         }
+        tx.commit()?;
         Ok(db)
     }
 
@@ -78,12 +94,25 @@ impl Db {
         DbRef(&self.conn).meta_i64(key)
     }
 
+    /// Write transaction that takes the lock up front, so concurrent writers wait
+    /// (busy_timeout) instead of failing on a read-to-write upgrade.
+    pub fn tx(&mut self) -> Result<rusqlite::Transaction<'_>> {
+        Ok(self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?)
+    }
+
     pub fn resolve_id(&self, prefix: &str) -> Result<String> {
+        // Literal prefix match: never let user input act as a LIKE pattern.
+        let prefix = prefix.trim().to_ascii_lowercase();
+        if prefix.is_empty() || !prefix.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+            bail!("task id must be a hex prefix, e.g. 5fc4");
+        }
         let mut st = self
             .conn
-            .prepare("SELECT id FROM tasks WHERE id LIKE ?1 || '%'")?;
+            .prepare("SELECT id FROM tasks WHERE substr(id,1,length(?1))=?1")?;
         let ids: Vec<String> = st
-            .query_map([prefix], |r| r.get(0))?
+            .query_map([&prefix], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
         match ids.len() {
             0 => bail!("no task matches '{prefix}'"),
@@ -94,7 +123,7 @@ impl Db {
 
     pub fn add(&mut self, title: &str) -> Result<String> {
         let title = clean_title(title)?;
-        let tx = self.conn.transaction()?;
+        let tx = self.tx()?;
         let db = DbRef(&tx);
         let v = db.bump()?;
         let pos: i64 = tx.query_row(
@@ -113,7 +142,7 @@ impl Db {
 
     /// Computer-side change to a task: records changed_ver so stale Kindle requests conflict.
     fn touch(&mut self, id: &str, sql: &str, arg: &dyn rusqlite::ToSql) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.tx()?;
         let v = DbRef(&tx).bump()?;
         let n = tx.execute(sql, params![arg, id])?;
         if n == 0 {
@@ -142,7 +171,7 @@ impl Db {
             .collect();
         let idx = (pos.max(1) as usize - 1).min(ids.len());
         ids.insert(idx, id.to_string());
-        let tx = self.conn.transaction()?;
+        let tx = self.tx()?;
         // Ordering bumps the plan but is not a task change, so Kindle requests stay valid.
         DbRef(&tx).bump()?;
         for (i, t) in ids.iter().enumerate() {
@@ -156,7 +185,7 @@ impl Db {
     }
 
     pub fn set_config(&mut self, focus: Option<i64>, brk: Option<i64>) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.tx()?;
         let db = DbRef(&tx);
         if let Some(f) = focus {
             if !(1..=240).contains(&f) {
@@ -222,7 +251,7 @@ impl Db {
         let Some(kind) = last else {
             bail!("no open conflict for this task")
         };
-        let tx = self.conn.transaction()?;
+        let tx = self.tx()?;
         let v = DbRef(&tx).bump()?;
         if accept_kindle {
             let st = if kind == "done" { "done" } else { "open" };
@@ -273,4 +302,40 @@ pub fn clean_title(t: &str) -> Result<String> {
         bail!("title longer than 200 characters");
     }
     Ok(t.chars().filter(|c| !c.is_control()).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn id_prefix_is_literal() {
+        let d = tempfile::tempdir().unwrap();
+        let mut db = Db::open(&d.path().join("t.db")).unwrap();
+        let id = db.add("only").unwrap();
+        for bad in ["%", "_", "", "  ", "a%"] {
+            assert!(db.resolve_id(bad).is_err(), "{bad:?} must not match");
+        }
+        assert_eq!(db.resolve_id(&id[..4]).unwrap(), id);
+        assert_eq!(db.resolve_id(&id[..4].to_uppercase()).unwrap(), id);
+    }
+
+    #[test]
+    fn titles_are_cleaned() {
+        assert!(clean_title("   ").is_err());
+        assert_eq!(clean_title(" a\u{7}b\n ").unwrap(), "ab");
+        assert!(clean_title(&"x".repeat(201)).is_err());
+    }
+
+    #[test]
+    fn reopened_done_conflict_then_kindle_reopen_applies() {
+        let d = tempfile::tempdir().unwrap();
+        let mut db = Db::open(&d.path().join("t.db")).unwrap();
+        let id = db.add("a").unwrap();
+        db.set_status(&id, "done").unwrap();
+        db.set_status(&id, "open").unwrap();
+        assert_eq!(db.tasks(true).unwrap().len(), 1);
+        db.move_to(&id, 99).unwrap();
+        assert_eq!(db.tasks(true).unwrap()[0].position, 1);
+    }
 }

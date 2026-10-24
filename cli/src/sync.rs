@@ -174,7 +174,7 @@ fn land(db: &mut Db, line: &str) -> Result<Value> {
     }
 
     let dev = req.device_id.clone();
-    let tx = db.conn.transaction()?;
+    let tx = db.tx()?;
     for (e, body) in &entries {
         let inserted = tx.execute(
             "INSERT OR IGNORE INTO entries(device_id,id,seq,kind,task_id,plan_version,wall,local_date,focus_sec,status,title,body)
@@ -358,5 +358,83 @@ mod tests {
         assert_eq!(r["type"], "error");
         let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM entries", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0, "nothing written");
+    }
+}
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn setup() -> (Db, String, tempfile::TempDir) {
+        let d = tempfile::tempdir().unwrap();
+        let db = Db::open(&d.path().join("t.db")).unwrap();
+        let dev = add_device(&db, "tok").unwrap();
+        (db, dev, d)
+    }
+    fn land(dev: &str, entries: Vec<Value>) -> String {
+        json!({"type":"land","proto":1,"device_id":dev,"token":"tok","clock":0,"entries":entries}).to_string()
+    }
+
+    #[test]
+    fn resolved_conflict_not_reopened_by_redelivery() {
+        let (mut db, dev, _d) = setup();
+        let t = db.add("A").unwrap();
+        let pv = db.meta_i64("plan_version").unwrap();
+        db.edit(&t, "B").unwrap();
+        let e = json!({"id":"e1","seq":1,"plan_version":pv,"kind":"done","task_id":t});
+        handle(&mut db, &land(&dev, vec![e.clone()]));
+        db.resolve(&t, false).unwrap();
+        handle(&mut db, &land(&dev, vec![e]));
+        assert!(db.conflicts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn kindle_done_then_reopen_in_one_flight() {
+        let (mut db, dev, _d) = setup();
+        let t = db.add("A").unwrap();
+        let pv = db.meta_i64("plan_version").unwrap();
+        let r = handle(&mut db, &land(&dev, vec![
+            json!({"id":"e1","seq":1,"plan_version":pv,"kind":"done","task_id":t}),
+            json!({"id":"e2","seq":2,"plan_version":pv,"kind":"reopen","task_id":t}),
+        ]));
+        assert_eq!(r["acked_seq"], 2);
+        let st: String = db.conn.query_row("SELECT status FROM tasks", [], |r| r.get(0)).unwrap();
+        assert_eq!(st, "open");
+        assert!(db.conflicts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn computer_done_then_kindle_done_is_noop() {
+        let (mut db, dev, _d) = setup();
+        let t = db.add("A").unwrap();
+        let pv = db.meta_i64("plan_version").unwrap();
+        db.set_status(&t, "done").unwrap();
+        handle(&mut db, &land(&dev, vec![json!({"id":"e1","seq":1,"plan_version":pv,"kind":"done","task_id":t})]));
+        assert!(db.conflicts().unwrap().is_empty(), "same outcome is not a conflict");
+    }
+
+    #[test]
+    fn unknown_task_and_device_isolation() {
+        let (mut db, dev, _d) = setup();
+        let r = handle(&mut db, &land(&dev, vec![json!({"id":"e1","seq":1,"plan_version":0,"kind":"done","task_id":"nope"})]));
+        assert_eq!(r["type"], "landed");
+        let other = add_device(&db, "tok2").unwrap();
+        let r = handle(&mut db, &json!({"type":"land","proto":1,"device_id":other,"token":"tok","entries":[]}).to_string());
+        assert_eq!(r["code"], "auth", "token of another device rejected");
+    }
+
+    #[test]
+    fn rejects_oversized_or_negative_values() {
+        let (mut db, dev, _d) = setup();
+        let t = db.add("A").unwrap();
+        for e in [
+            json!({"id":"x","seq":1,"plan_version":1,"kind":"session","task_id":t,"focus_sec":-5,"status":"completed","local_date":"2026-10-24"}),
+            json!({"id":"x","seq":1,"plan_version":1,"kind":"session","task_id":t,"focus_sec":99999999,"status":"completed","local_date":"2026-10-24"}),
+            json!({"id":"x","seq":0,"plan_version":1,"kind":"done","task_id":t}),
+            json!({"id":"x","seq":1,"plan_version":1,"kind":"session","task_id":t,"focus_sec":5,"status":"completed","local_date":"../../etc"}),
+        ] {
+            assert_eq!(handle(&mut db, &land(&dev, vec![e]))["type"], "error");
+        }
     }
 }

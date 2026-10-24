@@ -43,6 +43,8 @@ or `{"type":"error","code":"auth|proto|bad_entry","message":"..."}`.
 
 - Entries already stored (same `device_id` and `id`) are skipped, so redelivery is harmless. `acked_seq` is the highest stored sequence for the device. The Kindle deletes entries with `seq <= acked_seq` and atomically replaces its plan.
 - Sessions and breaks are always accepted.
-- `done`/`reopen` apply only if the task's last computer change is at or before the entry's `plan_version`. Otherwise they are stored as conflicts, the task shows `review: true`, and `pomo-kndl resolve` settles it.
+- `done`/`reopen` apply only if the task's last computer change is at or before the entry's `plan_version`. Otherwise they are stored as conflicts, the task shows `review: true`, and `pomo-kndl resolve` settles it. A request that matches the current state, or names an unknown task, is recorded and has no effect. Reordering on the computer does not count as a change.
+- The whole landing is validated before anything is written: one invalid entry rejects the landing with `bad_entry`, and the Kindle keeps its log.
+- Requests are served one connection at a time with a 30 second socket timeout. That is enough for one paired Kindle.
 - `wall` and `clock` are informational (clock offset, display grouping) and never decide ordering.
 - The plan contains every open (not done, not archived) task.
