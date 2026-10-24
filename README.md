@@ -1,8 +1,26 @@
 # pomo-kndl
 
-Status: first build. The CLI, sync engine, and Kindle app are tested on macOS. Kindle binaries are cross-compiled and installed but not yet confirmed running on the device.
-
 A quiet Kindle focus timer driven by a portable Rust CLI. The computer is the airport: it holds the authoritative state and runs operations. The Kindle is the airplane: it departs with a flight plan, works on its own while disconnected, and lands with a flight log that the computer reconciles.
+
+![Task list, focus, end of session, and break on a Paperwhite 5](docs/screens/overview.png)
+
+## Status (24 October 2026)
+
+Working end to end on a Paperwhite 5 Signature Edition (firmware 5.18.5.0.1, KOReader v2026.03, KUAL): the GTK 2 app launches from KUAL, runs the timer offline, and syncs with this Mac over pinned TLS.
+
+| Area | State | Evidence |
+| --- | --- | --- |
+| Rust CLI and database | Done | 15 unit tests, concurrent-writer check |
+| Sync engine (plan, log, landing, authority rules) | Done | unit tests, `tests/e2e.sh` |
+| Pinned TLS + pairing | Done | e2e: wrong pin and bad token refused |
+| Kindle core (state, timer, crash/reboot recovery) | Done | 7 C++ tests with a fake clock |
+| Kindle cross build | Done | `kindle/cross.sh`, `tests/kindle-vm.sh` (ARM VM, glibc 2.19) |
+| Kindle GTK 2 UI | Running on device | user-confirmed; screenshots in `docs/screens/` |
+| Install on Mac as a command | Not yet | run from `cli/target/release` |
+| Linux and Windows CLI | Not checked | |
+| Sleep/resume, Wi-Fi after wake, battery, e-ink refresh tuning | Not measured | needs on-device sessions |
+
+Known limits: `serve` handles one connection at a time (fine for one Kindle). The Kindle app needs KOReader installed for its TLS library. A reboot during focus pauses the session instead of counting the unknown gap.
 
 ## Direction
 
@@ -22,13 +40,18 @@ cd cli && cargo build --release
 
 # Kindle app on the host, for development (needs openssl@3, and gtk+ 2 for the GUI)
 cd kindle && make test dev gui
-POMO_KNDL_DIR=/path/with/pairing.json ./build/pomo-kndl-gui
+POMO_KNDL_DIR=/path/with/pairing.json POMO_KNDL_GEOMETRY=618x824 ./build/pomo-kndl-gui
 
-# End-to-end check: real Rust server + C++ client over pinned TLS
-./tests/e2e.sh
+# Tests
+./tests/e2e.sh          # real Rust server + C++ client over pinned TLS
+./tests/kindle-vm.sh    # cross-built ARM binary in an ARM VM (needs nix for qemu)
 ```
 
-Kindle install: run `kindle/cross.sh` with the Kindle mounted. It cross-compiles armhf binaries with zig against Debian 9 headers, targets glibc 2.17, and links the firmware's GTK 2 and KOReader's LibreSSL at run time. Copy `kindle/dist/pomo-kndl/` to `/mnt/us/extensions/`, write `pairing.json` there with `pomo-kndl pair --host <ip> --out /Volumes/Kindle/extensions/pomo-kndl/pairing.json`, eject, then open pomo-kndl from KUAL. The KUAL menu also has "Sync now" (headless) and "Diagnose", which writes `diagnose.txt` (libraries, boot id, network) for debugging over USB.
+Kindle install: with the Kindle mounted over USB, run `kindle/cross.sh`. It cross-compiles armhf binaries with clang and lld against a Debian sysroot (glibc 2.19, GLib/GTK headers from Debian 7), links the firmware's GTK 2 dynamically, and uses KOReader's LibreSSL at run time. Copy `kindle/dist/pomo-kndl/` to `/mnt/us/extensions/`, write `pairing.json` there with `pomo-kndl pair --host <ip> --out /Volumes/Kindle/extensions/pomo-kndl/pairing.json`, eject, and open pomo-kndl from KUAL.
+
+KUAL menu: Open, Close, Sync now (headless), Diagnose (writes `diagnose.txt`), GTK probe (5 s test window). Logs go to `extensions/pomo-kndl/pomo-kndl.log`.
+
+Screenshots are generated, not hand-made: `POMO_KNDL_SCRIPT="shot:list.png;tap:<task>;shot:focus.png"` drives the UI by button label and writes PNGs (desktop preview only).
 
 The wire format is in [PROTOCOL.md](PROTOCOL.md).
 
@@ -38,27 +61,17 @@ The wire format is in [PROTOCOL.md](PROTOCOL.md).
 - `kindle/src/core.*` C++ state, flight log, timer, atomic saves. No GTK or network.
 - `kindle/src/net.*` pinned TLS client (OpenSSL).
 - `kindle/src/gui_main.cpp` GTK 2 UI. `dev_main.cpp` headless driver used by tests and the KUAL "Sync now" item.
-- `kindle/kual/` KUAL extension files.
-- `tests/e2e.sh` end-to-end sync test.
+- `kindle/kual/` KUAL extension files. `kindle/cross.sh` device build.
+- `tests/e2e.sh` end-to-end sync test. `tests/kindle-vm.sh` ARM VM test.
+- `docs/screens/` UI screenshots at Paperwhite 5 proportions.
 
 ## Minimal Kindle UI
 
-Two views: a short task list and the current session. Black and white, large readable type, generous touch targets, no animations, charts, or decorative panels. A small `pomo-kndl` wordmark is enough branding for the first version.
+Two views: a short task list and the current session. Black and white, large readable type, generous touch targets, no animations, charts, or decorative panels.
 
-```text
-pomo-kndl                      offline
+The list shows up to seven tasks; tap one to start. The session screen shows the task, a large minute countdown, a 20-step progress bar (it changes in steps, so the e-ink refreshes rarely), and only the actions that apply: Pause/End while focusing, Resume/End while paused, Done/Later/Break at the end, End break during a break. The primary action is filled black. Exit is always in the footer; the timer keeps running while the app is closed.
 
-Write project outline
-
-              24 min
-               focus
-
-        [ Pause ]   [ End ]
-
-Today: 2 sessions · 48 min
-```
-
-Show only actions relevant to the current state. Selecting a task offers Start; an active session offers Pause and End; the end screen offers Done, Continue later, and Break. Completed tasks appear crossed off until the next landing; archived tasks are not carried. Tasks awaiting computer review show a small "review" marker. A Sync button triggers a manual connection. Finishing a timer does not automatically complete a task.
+Completed tasks appear crossed off until the next landing; tap one to reopen it. Archived tasks are not carried. Tasks awaiting computer review show a REVIEW marker. Finishing a timer does not automatically complete a task.
 
 Use a minute-level countdown and redraw only changed regions with e-ink-appropriate refresh modes. At expiry, transition visibly to the end screen. Default sessions are 25 minutes with an optional five-minute break; durations are configured through the CLI. Sleep, refresh, touch handling, and battery use need measurement on the actual device.
 
@@ -130,19 +143,19 @@ Compute elapsed time from a monotonic clock while running, and persist enough st
 ## Implementation boundary
 
 - **Computer:** one Rust executable, SQLite database, CLI commands, and the foreground TLS sync listener. Choose dependencies when implementing.
-- **Kindle:** one native C++17 and GTK 2 executable, cross-compiled for the Paperwhite 5 (confirm the ARM target and ABI), launched via KUAL. Durable state uses atomic writes (write, fsync, rename) or bundled SQLite. TLS uses a library that cross-compiles cleanly (for example OpenSSL or mbedTLS). Handle suspend/resume through the device's system events (verify).
-- Keep application data in per-user application storage, separate from source files.
-- No firmware changes and no persistent device daemon are planned.
+- **Kindle:** one native C++14 and GTK 2 executable for armhf (Cortex-A7, hard float, glibc >= 2.19), launched via KUAL. It links the firmware's GTK 2.20 / GLib 2.50 dynamically and never embeds them (the build refuses to package if it does). Durable state is one JSON file written atomically (write, fsync, rename). TLS uses KOReader's LibreSSL 4.x. Suspend is handled by reading `CLOCK_BOOTTIME` on every tick, so a due timer is reconciled on wake.
+- Keep application data in per-user application storage, separate from source files. On the Kindle that is the extension folder.
+- No firmware changes and no persistent device daemon.
 
-Earlier read-only inspection identified a Paperwhite 5 Signature Edition, firmware 5.18.5.0.1, with KUAL installed. The device has not been modified for this project.
+The only change made to the device is the `extensions/pomo-kndl/` folder.
 
 ## Build order and acceptance checks
 
-1. **Kindle proof:** cross-compile toolchain, a GTK 2 window launched from KUAL, touch input, partial refresh, sleep/resume timing, Wi-Fi after wake, a pinned TLS connection to the Mac, and battery measurement.
-2. **Local CLI:** add/edit/move/archive/complete tasks, settings, history. Verify persistence after restart and task identity across edits.
-3. **Offline Kindle workflow:** a complete focus/break cycle with the computer off, pause accounting, explicit completion requests, and recovery from interrupted writes.
-4. **Sync:** flight plan, flight log, landing. Verify reconnect, repeated delivery, interrupted transfer, the three authority rules, and history without duplicates.
-5. **Install** the CLI on this Mac and document use. Check other operating systems before claiming support.
+1. **Kindle proof:** done. Toolchain, GTK 2 window from KUAL, touch input, pinned TLS to the Mac. Still to measure: partial refresh, sleep/resume timing, Wi-Fi after wake, battery.
+2. **Local CLI:** done. Persistence across restarts and task identity across edits are tested.
+3. **Offline Kindle workflow:** done in tests (focus/break cycle, pause accounting, explicit completion, reboot recovery); needs a real disconnected session on the device.
+4. **Sync:** done. Reconnect, repeated delivery, interrupted transfer, the three authority rules, and history without duplicates are tested.
+5. **Install** the CLI on this Mac as a command and document use; check Linux and Windows. Not started.
 
 ## Deferred scope
 

@@ -28,8 +28,8 @@ dev: $(BUILD)
 
 # GTK 2 UI. Needs gtk+-2.0 via pkg-config (on the Kindle toolchain sysroot).
 gui: $(BUILD)
-	$(CXX) $(CXXFLAGS) $(SSL_CFLAGS) $(shell pkg-config --cflags gtk+-2.0) -o $(BUILD)/pomo-kndl-gui \
-	  src/gui_main.cpp $(CORE) $(NET) $(shell pkg-config --libs gtk+-2.0) $(SSL_LIBS)
+	$(CXX) $(CXXFLAGS) $(SSL_CFLAGS) $(shell pkg-config --cflags gtk+-2.0 gmodule-2.0) -o $(BUILD)/pomo-kndl-gui \
+	  src/gui_main.cpp $(CORE) $(NET) $(shell pkg-config --libs gtk+-2.0 gmodule-2.0) $(SSL_LIBS)
 
 # Cross build for the Kindle (armhf). Example:
 #   make kindle CROSS=arm-kindlehf-linux-gnueabihf- SYSROOT=$$HOME/x-tools/arm-kindlehf-linux-gnueabihf/arm-kindlehf-linux-gnueabihf/sysroot

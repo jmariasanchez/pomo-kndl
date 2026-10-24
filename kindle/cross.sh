@@ -96,7 +96,7 @@ OUT="$HERE/build-kindle"; mkdir -p "$OUT"
 cd "$HERE"
 CXX -o "$OUT/pomo-kndl-dev" src/dev_main.cpp src/core.cpp src/net.cpp -lssl -lcrypto -lpthread
 CXX -o "$OUT/pomo-kndl-gui" src/gui_main.cpp src/core.cpp src/net.cpp $INC $GTKLIBS \
-  -lgtk-x11-2.0 -lgdk-x11-2.0 -lgobject-2.0 -lglib-2.0 -lssl -lcrypto -lpthread
+  -lgtk-x11-2.0 -lgdk-x11-2.0 -lgdk_pixbuf-2.0 -lpango-1.0 -lgobject-2.0 -lgmodule-2.0 -lglib-2.0 -lssl -lcrypto -lpthread
 # Plain-C GTK probe (KUAL "GTK probe") to separate toolchain problems from app problems.
 PATH="$LLD_DIR:$PATH" "${CLANGXX%++}" $(echo "$FLAGS" | sed 's/-std=c++14//; s/-static-libstdc++//; s/--stdlib=libstdc++//') \
   -o "$OUT/gtk-probe" tests/gtk_probe.c $INC $GTKLIBS -lgtk-x11-2.0 -lgobject-2.0 -lglib-2.0
