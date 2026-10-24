@@ -15,7 +15,7 @@ Working end to end on a Paperwhite 5 Signature Edition (firmware 5.18.5.0.1, KOR
 | Pinned TLS + pairing | Done | e2e: wrong pin and bad token refused |
 | Kindle core (state, timer, crash/reboot recovery) | Done | 7 C++ tests with a fake clock |
 | Kindle cross build | Done | `kindle/cross.sh`, `tests/kindle-vm.sh` (ARM VM, glibc 2.19) |
-| Kindle GTK 2 UI | Running on device | user-confirmed; screenshots in `docs/screens/` |
+| Kindle GTK 2 UI | Original version running on device; cleanup tested on host | native GTK workflow/layout checks in `tests/ui.sh`; screenshots in `docs/screens/` |
 | Install on Mac as a command | Not yet | run from `cli/target/release` |
 | Linux and Windows CLI | Not checked | |
 | Sleep/resume, Wi-Fi after wake, battery, e-ink refresh tuning | Not measured | needs on-device sessions |
@@ -45,13 +45,16 @@ POMO_KNDL_DIR=/path/with/pairing.json POMO_KNDL_GEOMETRY=618x824 ./build/pomo-kn
 # Tests
 ./tests/e2e.sh          # real Rust server + C++ client over pinned TLS
 ./tests/kindle-vm.sh    # cross-built ARM binary in an ARM VM (needs nix for qemu)
+make -C kindle net-test # TCP deadlines, stalled TLS, pinned exchange and wrong-pin rejection
+bash tests/ui.sh       # real GTK callbacks, layouts and GUI-to-server sync; needs desktop GTK 2
+bash tests/ui.sh docs/screens  # regenerate screenshots (ImageMagick adds overview.png)
 ```
 
 Kindle install: with the Kindle mounted over USB, run `kindle/cross.sh`. It cross-compiles armhf binaries with clang and lld against a Debian sysroot (glibc 2.19, GLib/GTK headers from Debian 7), links the firmware's GTK 2 dynamically, and uses KOReader's LibreSSL at run time. Copy `kindle/dist/pomo-kndl/` to `/mnt/us/extensions/`, write `pairing.json` there with `pomo-kndl pair --host <ip> --out /Volumes/Kindle/extensions/pomo-kndl/pairing.json`, eject, and open pomo-kndl from KUAL.
 
 KUAL menu: Open, Close, Sync now (headless), Diagnose (writes `diagnose.txt`), GTK probe (5 s test window). Logs go to `extensions/pomo-kndl/pomo-kndl.log`.
 
-Screenshots are generated, not hand-made: `POMO_KNDL_SCRIPT="shot:list.png;tap:<task>;shot:focus.png"` drives the UI by button label and writes PNGs (desktop preview only).
+Screenshots are generated, not hand-made: `POMO_KNDL_SCRIPT="shot:list.png;tap:<task>;shot:focus.png"` dispatches GTK button events and writes PNGs (desktop preview only). The test script also supports `key:<target>` (Enter activation), `expect:<visible text>`, `absent:<visible text>`, `wait-sync` and `fit`. Set `POMO_KNDL_AUTO_SYNC=1` to exercise normal launch sync during a scripted preview. Missing targets, failed screenshots, and content extending outside its container fail the process rather than silently passing. Tests use isolated data and never change the real Kindle pairing or task log.
 
 The wire format is in [PROTOCOL.md](PROTOCOL.md).
 
@@ -67,13 +70,13 @@ The wire format is in [PROTOCOL.md](PROTOCOL.md).
 
 ## Minimal Kindle UI
 
-Two views: a short task list and the current session. Black and white, large readable type, generous touch targets, no animations, charts, or decorative panels.
+Two main views: a short task list and the current session. A connection-details view is available from the underlined status in either screen. Black and white, large readable type, generous touch targets, no animations, charts, or decorative panels.
 
-The list shows up to seven tasks; tap one to start. The session screen shows the task, a large minute countdown, a 20-step progress bar (it changes in steps, so the e-ink refreshes rarely), and only the actions that apply: Pause/End while focusing, Resume/End while paused, Done/Later/Break at the end, End break during a break. The primary action is filled black. Exit is always in the footer; the timer keeps running while the app is closed.
+The list shows five tasks per page with Previous/Next controls, so every carried task remains available offline. Long row titles are ellipsized without displacing the Review marker; the session view shows the full title at a size that leaves room for all actions. The session screen shows a minute countdown, a 20-step progress bar, and only the actions that apply: Pause/End session while focusing, Resume/End session while paused, Complete task/Keep open/Take a break at the end, End break during a break. The primary action is filled black. Exit is always in the footer; the timer keeps running while the app is closed.
 
-Completed tasks appear crossed off until the next landing; tap one to reopen it. Archived tasks are not carried. Tasks awaiting computer review show a REVIEW marker. Finishing a timer does not automatically complete a task.
+Completed tasks appear crossed off until the next landing; tap one to reopen it. Archived tasks are not carried. Tasks awaiting computer review show a Review marker. Finishing a timer does not automatically complete a task.
 
-Use a minute-level countdown and redraw only changed regions with e-ink-appropriate refresh modes. At expiry, transition visibly to the end screen. Default sessions are 25 minutes with an optional five-minute break; durations are configured through the CLI. Sleep, refresh, touch handling, and battery use need measurement on the actual device.
+The UI skips redraws when its displayed state is unchanged, but currently rebuilds the view when it changes. Region-only refresh and e-ink refresh-mode tuning remain unimplemented. At expiry, transition visibly to the end screen. Default sessions are 25 minutes with an optional five-minute break; durations are configured through the CLI. Sleep, refresh, touch handling, and battery use need measurement on the actual device.
 
 ## Computer workflow
 
@@ -125,10 +128,25 @@ Device wall-clock time never decides ordering. Without the computer, the Kindle 
 
 ## Connection and security
 
-- The computer runs `serve` and listens on the local network. The Kindle connects out as a client when awake, on demand and with bounded retries and backoff. No constant polling.
-- TLS is required for all Wi-Fi sync. Pairing exchanges and pins each side's identity (certificate or public key fingerprint). Credentials are stored outside the repository in per-user application storage.
+- The computer runs `serve` and listens on the local network. The Kindle makes one attempt each time the GUI opens, including when its outgoing log is empty, and on manual Sync. No constant polling, automatic retry/backoff, or wake-triggered sync is implemented.
+- TLS is required for all Wi-Fi sync. The Kindle pins the SHA-256 fingerprint of the computer's certificate; the computer authenticates the device with its random pairing token. Credentials are stored outside the repository in per-user application storage.
 - A small versioned protocol shared by Rust and C++ carries only validated task/session operations, never arbitrary commands or filesystem paths.
 - Wi-Fi availability after Kindle wake must be measured; sync only happens while the device is awake.
+
+### Connection design: what was wrong and what still needs care
+
+Sync is a short, explicit exchange, not a persistent connection. A saved success marker cannot tell whether the computer is reachable now. The header says **Last sync OK**, pending changes, or a specific failure state; tap it for the endpoint, pending count, failure detail and retry. Sync remains available with an empty task list and during a session. Opening connection details never pauses the timer.
+
+The UI cleanup fixes four concrete failure paths:
+
+- Invalid pairing JSON used to leave the syncing flag set, preventing further attempts. It now shows recovery instructions and permits retry without a restart.
+- Transport and server errors were reduced to a generic offline/refused header. The details view now retains the reason, while saved offline work stays local until acknowledged.
+- Launching with an empty outgoing log and a past success skipped sync, so newly added computer tasks could be missed. Each normal launch now attempts a fresh landing.
+- Socket read/write timeouts did not reliably bound the original blocking TCP connect. A nonblocking connect now has one steady-clock deadline across resolved addresses. DNS resolution is still blocking; TLS has per-I/O timeouts rather than a total exchange deadline.
+
+The architecture still requires the computer to be awake with `pomo-kndl serve` running and both devices able to reach each other on the LAN. Pairing stores a host address, with no discovery: a changed DHCP address, guest-network isolation, firewall or VPN routing can prevent sync. Keep the computer's LAN address stable, or update the `host` in the existing pairing file after checking the new address. A server-identity mismatch is different: verify the intended computer and its certificate before replacing trust. Do not disable the certificate pin to work around it.
+
+On 24 October 2026, inspection found that the mounted Kindle's saved host matched the Mac's current LAN IP and the listener was running. A deliberately unauthenticated probe passed the pinned TLS handshake and received the expected auth rejection. This checks the Mac endpoint and certificate, not connectivity from the Kindle over Wi-Fi. No real device credentials or flight log were sent, and the mounted device was not modified. The refreshed UI still needs an on-device touch/refresh check before calling this cleanup device-verified.
 
 ## Timer and tracking rules
 

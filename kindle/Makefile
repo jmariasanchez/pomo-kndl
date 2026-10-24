@@ -23,6 +23,13 @@ test: $(BUILD)
 	$(CXX) $(CXXFLAGS) -o $(BUILD)/core_test tests/core_test.cpp $(CORE)
 	./$(BUILD)/core_test
 
+net-test: $(BUILD)
+	$(CXX) $(CXXFLAGS) $(SSL_CFLAGS) -pthread -o $(BUILD)/net_test tests/net_test.cpp $(SSL_LIBS)
+	./$(BUILD)/net_test
+
+ui-test:
+	bash ../tests/ui.sh
+
 dev: $(BUILD)
 	$(CXX) $(CXXFLAGS) $(SSL_CFLAGS) -o $(BUILD)/pomo-kndl-dev src/dev_main.cpp $(CORE) $(NET) $(SSL_LIBS)
 
@@ -46,4 +53,4 @@ package: kindle
 clean:
 	rm -rf build build-kindle dist
 
-.PHONY: all test dev gui kindle package clean
+.PHONY: all test net-test ui-test dev gui kindle package clean
