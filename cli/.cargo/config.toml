@@ -1,0 +1,6 @@
+# Avoid non-system cc on PATH (e.g. Nix) that cannot find libiconv.
+[target.aarch64-apple-darwin]
+linker = "/usr/bin/cc"
+
+[target.x86_64-apple-darwin]
+linker = "/usr/bin/cc"
