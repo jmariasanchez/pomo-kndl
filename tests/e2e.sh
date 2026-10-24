@@ -20,28 +20,41 @@ pk pair --host 127.0.0.1 --port $PORT --out "$KD/pairing.json" >/dev/null
 
 # 1. First landing delivers the flight plan.
 serve; "$K" "$KD" sync >/dev/null; wait
-[ "$("$K" "$KD" tasks | wc -l | tr -d ' ')" = 2 ] && ok "flight plan carried 2 tasks"
+TASK_COUNT=$("$K" "$KD" tasks | wc -l | tr -d ' ')
+[ "$TASK_COUNT" = 2 ]
+ok "flight plan carried 2 tasks"
 
 # 2. Offline: interrupted session + done request on task 1.
-"$K" "$KD" start 1; "$K" "$KD" end; "$K" "$KD" done
-"$K" "$KD" tasks | grep -q "1 \[x\] Write" && ok "done shown locally while offline"
+"$K" "$KD" start 1; "$K" "$KD" end; "$K" "$KD" "done"
+# Do not use grep -q in pipelines: consume all output so producers cannot hit EPIPE.
+"$K" "$KD" tasks | grep "1 \[x\] Write" >/dev/null
+ok "done shown locally while offline"
 
 # Computer meanwhile renames task 2 (Kindle untouched there).
 ID2=$(pk tasks | awk '/Review/{print $(NF-2)}')
 pk edit "$ID2" "Review notes v2" >/dev/null
 
 # 3. Landing: session accepted, done applied, renamed title arrives.
-serve; "$K" "$KD" sync | grep -q "0 pending" && ok "log acked"; wait
-pk tasks | grep -q "\[x\].*Write project outline" && ok "Kindle done applied on computer"
-pk history | grep -q "interrupted" && ok "session in history"
-"$K" "$KD" tasks | grep -q "Review notes v2" && ok "rename carried back"
+serve
+"$K" "$KD" sync | grep "0 pending" >/dev/null
+ok "log acked"
+wait
+pk tasks | grep "\[x\].*Write project outline" >/dev/null
+ok "Kindle done applied on computer"
+pk history | grep "interrupted" >/dev/null
+ok "session in history"
+"$K" "$KD" tasks | grep "Review notes v2" >/dev/null
+ok "rename carried back"
 
 # 4. Conflict: Kindle marks task 2 done, computer archives it before landing.
-"$K" "$KD" start 1; "$K" "$KD" end; "$K" "$KD" done
+"$K" "$KD" start 1; "$K" "$KD" end; "$K" "$KD" "done"
 pk archive "$ID2" >/dev/null
 serve; "$K" "$KD" sync >/dev/null; wait
-pk status | grep -q "Kindle asked 'done'" && ok "conflict flagged for review"
-pk resolve "$ID2" --keep >/dev/null && pk status | grep -q "nothing to review" && ok "resolved"
+pk status | grep "Kindle asked 'done'" >/dev/null
+ok "conflict flagged for review"
+pk resolve "$ID2" --keep >/dev/null
+pk status | grep "nothing to review" >/dev/null
+ok "resolved"
 
 # 5. Repeated delivery: no duplicates.
 N1=$(pk history | grep -c "min  ")
@@ -49,14 +62,18 @@ cp "$KD/state.json" "$W/backup.json"
 "$K" "$KD" start 1 2>/dev/null || true
 serve; "$K" "$KD" sync >/dev/null; wait
 N2=$(pk history | grep -c "min  ")
-[ "$N1" = "$N2" ] && ok "no duplicate sessions ($N2)"
+[ "$N1" = "$N2" ]
+ok "no duplicate sessions ($N2)"
 
 # 6. Wrong pin is refused and keeps the log.
 pk add "New task" >/dev/null
-jq '.server_sha256="00"' "$KD/pairing.json" > "$W/p" && cp "$KD/pairing.json" "$W/good" && cp "$W/p" "$KD/pairing.json"
+jq '.server_sha256="00"' "$KD/pairing.json" > "$W/p"
+cp "$KD/pairing.json" "$W/good"
+cp "$W/p" "$KD/pairing.json"
 serve
 if "$K" "$KD" sync 2>"$W/err"; then echo "FAIL pin accepted"; exit 1; fi
-grep -q "identity mismatch" "$W/err" && ok "wrong server pin refused"
+grep -q "identity mismatch" "$W/err"
+ok "wrong server pin refused"
 wait || true
 cp "$W/good" "$KD/pairing.json"
 
@@ -64,6 +81,7 @@ cp "$W/good" "$KD/pairing.json"
 jq '.token="bad"' "$KD/pairing.json" > "$W/p2"; cp "$W/p2" "$KD/pairing.json"
 serve
 if "$K" "$KD" sync 2>"$W/err"; then echo "FAIL bad token accepted"; exit 1; fi
-grep -q "auth" "$W/err" && ok "bad token refused"
+grep -q "auth" "$W/err"
+ok "bad token refused"
 wait || true
 echo "e2e: all checks passed"

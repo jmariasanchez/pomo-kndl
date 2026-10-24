@@ -101,14 +101,24 @@ CXX -o "$OUT/pomo-kndl-gui" src/gui_main.cpp src/core.cpp src/net.cpp $INC $GTKL
 PATH="$LLD_DIR:$PATH" "${CLANGXX%++}" $(echo "$FLAGS" | sed 's/-std=c++14//; s/-static-libstdc++//; s/--stdlib=libstdc++//') \
   -o "$OUT/gtk-probe" tests/gtk_probe.c $INC $GTKLIBS -lgtk-x11-2.0 -lgobject-2.0 -lglib-2.0
 
-rm -rf "$HERE/dist" && mkdir -p "$HERE/dist/pomo-kndl/bin"
 # Guard: GLib/GObject must come from the device, never be embedded in our binaries.
-READELF="${READELF:-$(nix build --no-link --print-out-paths nixpkgs#binutils-unwrapped)/bin/readelf}"
+if [ -z "${READELF:-}" ]; then
+  BINUTILS="$(nix build --no-link --print-out-paths nixpkgs#binutils-unwrapped)"
+  # Nix can print multiple outputs, including the manual, rather than a single store path.
+  for store in $BINUTILS; do
+    if [ -x "$store/bin/readelf" ]; then READELF="$store/bin/readelf"; break; fi
+  done
+fi
+if [ -z "${READELF:-}" ] || ! command -v "$READELF" >/dev/null; then
+  echo "ERROR: readelf is unavailable; refusing to package without the GLib linkage check"; exit 1
+fi
 for b in pomo-kndl-gui gtk-probe; do
-  if "$READELF" --dyn-syms -W "$OUT/$b" | awk '$7 != "UND"' | grep -qE ' g_(once_init_leave|type_register_static|object_new)$'; then
+  symbols="$("$READELF" --dyn-syms -W "$OUT/$b")"
+  if printf '%s\n' "$symbols" | awk '$7 != "UND"' | grep -E ' g_(once_init_leave|type_register_static|object_new)$' >/dev/null; then
     echo "ERROR: $b embeds GLib/GObject code (static link); refusing to package"; exit 1
   fi
 done
+rm -rf "$HERE/dist" && mkdir -p "$HERE/dist/pomo-kndl/bin"
 cp "$OUT/pomo-kndl-gui" "$OUT/pomo-kndl-dev" "$OUT/gtk-probe" "$HERE/dist/pomo-kndl/bin/"
 cp "$HERE"/kual/* "$HERE/dist/pomo-kndl/"
 chmod +x "$HERE"/dist/pomo-kndl/*.sh "$HERE"/dist/pomo-kndl/bin/*
