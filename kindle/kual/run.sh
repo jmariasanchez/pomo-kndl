@@ -3,15 +3,17 @@
 DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG="$DIR/pomo-kndl.log"
 export POMO_KNDL_DIR="$DIR"
-# TLS comes from KOReader's bundled LibreSSL; GTK 2 comes from the firmware.
+# TLS comes from KOReader's bundled LibreSSL (used in place, so KOReader updates apply);
+# GTK 2 comes from the firmware.
 KOLIBS=/mnt/us/koreader/libs
-mkdir -p "$DIR/lib"
-for l in libssl.so.60 libcrypto.so.57; do
-  [ -e "$DIR/lib/$l" ] || cp "$KOLIBS/$l" "$DIR/lib/$l" 2>>"$LOG"
-done
-export LD_LIBRARY_PATH="$DIR/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$DIR/lib:$KOLIBS:$LD_LIBRARY_PATH"
 cd "$DIR" || exit 1
 echo "--- $(date) run.sh $*" >>"$LOG"
+
+if [ "$1" != diagnose ] && [ ! -f "$KOLIBS/libssl.so.60" ]; then
+  echo "KOReader's libssl.so.60 not found in $KOLIBS: install or update KOReader" >>"$LOG"
+  exit 1
+fi
 
 case "$1" in
   sync)
@@ -23,14 +25,16 @@ case "$1" in
       echo "uptime: $(cat /proc/uptime)"
       ls -l /lib/libc.so.6 /lib/ld-linux-armhf.so.3 2>&1
       for l in libgtk-x11-2.0.so.0 libgdk-x11-2.0.so.0 libgobject-2.0.so.0 libglib-2.0.so.0; do
-        p=$(ls /usr/lib/$l /lib/$l 2>/dev/null | head -1); echo "$l: ${p:-MISSING}"
+        p=""; for d in /usr/lib /lib; do [ -e "$d/$l" ] && p="$d/$l" && break; done
+        echo "$l: ${p:-MISSING}"
       done
+      echo "ldd gui:"; ldd "$DIR/bin/pomo-kndl-gui" 2>&1 || /lib/ld-linux-armhf.so.3 --list "$DIR/bin/pomo-kndl-gui" 2>&1
+      echo "koreader libssl: $(ls -l "$KOLIBS/libssl.so.60" 2>&1)"
       echo "dev state:"; "$DIR/bin/pomo-kndl-dev" "$DIR" state 2>&1
       echo "net:"; ip addr show wlan0 2>&1 | grep inet
     } >"$DIR/diagnose.txt" 2>&1
     exit 0 ;;
 esac
 
-# Prevent the screensaver from suspending mid-session is a device policy we do not change.
 "$DIR/bin/pomo-kndl-gui" >>"$LOG" 2>&1
 echo "gui exit $?" >>"$LOG"
