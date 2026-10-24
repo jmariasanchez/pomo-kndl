@@ -5,9 +5,10 @@
       "priority": 0,
       "items": [
         { "name": "Open pomo-kndl", "priority": 1, "action": "./run.sh", "params": "", "exitmenu": true },
-        { "name": "Sync now", "priority": 2, "action": "./run.sh", "params": "sync", "exitmenu": false },
-        { "name": "Diagnose (writes diagnose.txt)", "priority": 3, "action": "./run.sh", "params": "diagnose", "exitmenu": false },
-        { "name": "GTK probe (5 s test window)", "priority": 4, "action": "./run.sh", "params": "probe", "exitmenu": true }
+        { "name": "Close pomo-kndl", "priority": 2, "action": "./run.sh", "params": "stop", "exitmenu": false },
+        { "name": "Sync now", "priority": 3, "action": "./run.sh", "params": "sync", "exitmenu": false },
+        { "name": "Diagnose (writes diagnose.txt)", "priority": 4, "action": "./run.sh", "params": "diagnose", "exitmenu": false },
+        { "name": "GTK probe (5 s test window)", "priority": 5, "action": "./run.sh", "params": "probe", "exitmenu": true }
       ]
     }
   ]

@@ -122,6 +122,9 @@ void a_later(const std::string&) { U.app->finish_later(); }
 void a_break(const std::string&) { U.app->finish_break(); }
 void a_end_break(const std::string&) { U.app->end_break(); }
 void a_reopen(const std::string& id) { U.app->reopen(id); }
+// State is saved after every action, so exiting never loses work. A running timer keeps
+// counting (it is stored as a start time) and is reconciled when the app is reopened.
+void a_exit(const std::string&) { gtk_main_quit(); }
 
 std::string mins(int64_t sec) { return std::to_string((sec + 59) / 60) + " min"; }  // countdown: round up
 std::string mins_done(int64_t sec) { return std::to_string(sec / 60) + " min"; }      // focused: never overstate
@@ -142,7 +145,8 @@ void build_list(GtkWidget* box) {
                               [](gpointer d, GClosure*) { delete static_cast<Btn*>(d); }, (GConnectFlags)0);
         gtk_box_pack_start(GTK_BOX(box), b, FALSE, FALSE, 4);
     }
-    gtk_box_pack_end(GTK_BOX(box), button(U.syncing ? "Syncing" : "Sync", do_sync), FALSE, FALSE, 10);
+    GtkWidget* bottom = row({button(U.syncing ? "Syncing" : "Sync", do_sync), button("Exit", a_exit)});
+    gtk_box_pack_end(GTK_BOX(box), bottom, FALSE, FALSE, 10);
 }
 
 void build_session(GtkWidget* box) {
@@ -171,6 +175,8 @@ void build_session(GtkWidget* box) {
         default: break;
     }
     if (r) gtk_box_pack_start(GTK_BOX(box), r, FALSE, FALSE, 60);
+    // Leaving mid-session is safe: the timer is a saved start time and keeps running.
+    gtk_box_pack_end(GTK_BOX(box), button("Exit (timer keeps running)", a_exit), FALSE, FALSE, 10);
 }
 
 std::string signature() {

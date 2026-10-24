@@ -5,10 +5,13 @@ LOG="$DIR/pomo-kndl.log"
 export POMO_KNDL_DIR="$DIR"
 # TLS comes from KOReader's bundled LibreSSL. Expose only those two libraries: putting all of
 # koreader/libs on the path swaps in its libz/libpng/freetype, which breaks the firmware's GTK.
+# Copy (not symlink): /mnt/us is FAT and cannot hold symlinks. Refresh if KOReader updated them.
 KOLIBS=/mnt/us/koreader/libs
 mkdir -p "$DIR/lib"
 for l in libssl.so.60 libcrypto.so.57; do
-  [ -f "$KOLIBS/$l" ] && ln -sf "$KOLIBS/$l" "$DIR/lib/$l"
+  if [ -f "$KOLIBS/$l" ] && ! cmp -s "$KOLIBS/$l" "$DIR/lib/$l"; then
+    cp "$KOLIBS/$l" "$DIR/lib/$l.tmp" && mv "$DIR/lib/$l.tmp" "$DIR/lib/$l"
+  fi
 done
 export LD_LIBRARY_PATH="$DIR/lib"
 cd "$DIR" || exit 1
@@ -22,6 +25,9 @@ fi
 case "$1" in
   sync)
     exec "$DIR/bin/pomo-kndl-dev" "$DIR" sync >>"$LOG" 2>&1 ;;
+  stop)
+    killall pomo-kndl-gui 2>/dev/null && echo "stopped from KUAL" >>"$LOG"
+    exit 0 ;;
   probe)
     export DISPLAY="${DISPLAY:-:0}"
     "$DIR/bin/gtk-probe" >>"$LOG" 2>&1
@@ -46,6 +52,8 @@ case "$1" in
 esac
 
 export DISPLAY="${DISPLAY:-:0}"
+# One instance only: a second tap on Open would otherwise stack windows.
+killall pomo-kndl-gui 2>/dev/null
 # Detach so KUAL closing does not take the app with it.
 (
   "$DIR/bin/pomo-kndl-gui" >>"$LOG" 2>&1
