@@ -3,10 +3,14 @@
 DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG="$DIR/pomo-kndl.log"
 export POMO_KNDL_DIR="$DIR"
-# TLS comes from KOReader's bundled LibreSSL (used in place, so KOReader updates apply);
-# GTK 2 comes from the firmware.
+# TLS comes from KOReader's bundled LibreSSL. Expose only those two libraries: putting all of
+# koreader/libs on the path swaps in its libz/libpng/freetype, which breaks the firmware's GTK.
 KOLIBS=/mnt/us/koreader/libs
-export LD_LIBRARY_PATH="$DIR/lib:$KOLIBS:$LD_LIBRARY_PATH"
+mkdir -p "$DIR/lib"
+for l in libssl.so.60 libcrypto.so.57; do
+  [ -f "$KOLIBS/$l" ] && ln -sf "$KOLIBS/$l" "$DIR/lib/$l"
+done
+export LD_LIBRARY_PATH="$DIR/lib"
 cd "$DIR" || exit 1
 echo "--- $(date) run.sh $*" >>"$LOG"
 
@@ -18,6 +22,11 @@ fi
 case "$1" in
   sync)
     exec "$DIR/bin/pomo-kndl-dev" "$DIR" sync >>"$LOG" 2>&1 ;;
+  probe)
+    export DISPLAY="${DISPLAY:-:0}"
+    "$DIR/bin/gtk-probe" >>"$LOG" 2>&1
+    echo "probe exit $?" >>"$LOG"
+    exit 0 ;;
   diagnose)
     {
       echo "uname: $(uname -a)"

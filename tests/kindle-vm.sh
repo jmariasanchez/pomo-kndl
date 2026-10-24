@@ -32,11 +32,10 @@ done
 ln -sf /bin/busybox "$R/bin/sh"
 (cd "$W" && gunzip -c "$VM/di.gz" | cpio -id 'lib/modules/*/kernel/drivers/virtio/*' 'lib/modules/*/kernel/drivers/net/virtio_net.ko' 2>/dev/null)
 find "$W/lib" -name '*.ko' -exec cp {} "$R/mods/" \;
-for l in libssl.so.60 libcrypto.so.57 libstdc++.so.6; do
-  src="$KOLIBS/$l"; [ -f "$src" ] || src="$CACHE/kindlelibs/$l"
+for l in libssl.so.60 libcrypto.so.57 libgcc_s.so.1; do
+  src="$KOLIBS/$l"; [ -f "$src" ] || src="$CACHE/kindlelibs/$l"; [ -f "$src" ] || src="$CACHE/root/lib/arm-linux-gnueabihf/$l"
   cp "$src" "$R/kolibs/"
 done
-cp "$CACHE/root/lib/arm-linux-gnueabihf/libgcc_s.so.1" "$R/kolibs/" 2>/dev/null || true
 cp "$ROOT/kindle/build-kindle/pomo-kndl-dev" "$R/app/"
 
 CLI="$ROOT/cli/target/debug/pomo-kndl"; H="$W/home"; PORT=$((20000 + RANDOM % 20000))

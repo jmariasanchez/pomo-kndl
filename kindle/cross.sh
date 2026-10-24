@@ -24,9 +24,14 @@ libselinux1 libmount1 libblkid1 zlib1g libbsd0 libuuid1 libstdc++-6-dev libstdc+
 linux-libc-dev"
 # Installed last so glibc headers/libs are 2.19 (older than the Kindle's 2.20).
 JESSIE="libc6 libc6-dev"
+# GTK/GLib headers for the GUI come from Debian 7 (GLib 2.32, GTK 2.24.10). Newer GLib headers inline
+# g_once_init_* paths the Kindle's older GLib does not have, and the GUI fails before drawing.
+WHEEZY="libgtk2.0-dev libglib2.0-dev libpango1.0-dev libcairo2-dev libgdk-pixbuf2.0-dev libatk1.0-dev
+libfreetype6-dev libpng12-dev libpixman-1-dev libx11-dev x11proto-core-dev libfontconfig1-dev"
 
-fetch() { # dist pkgs...
+fetch() { # dist pkgs...  (into $DEST, default $CACHE/root)
   local dist=$1; shift
+  local dest="${DEST:-$CACHE/root}"
   local idx="$CACHE/debs/Packages.$dist"
   [ -f "$idx" ] || curl -sfL "$MIRROR/dists/$dist/main/binary-armhf/Packages.gz" | gunzip > "$idx"
   for p in "$@"; do
@@ -36,7 +41,7 @@ fetch() { # dist pkgs...
     f="$CACHE/debs/$dist-$(basename "$u")"
     [ -f "$f" ] || curl -sfL "$MIRROR/$u" -o "$f"
     m=$(ar t "$f" | grep data.tar)
-    (cd "$CACHE/root" && case $m in *xz) ar p "$f" "$m" | tar xJ ;; *) ar p "$f" "$m" | tar xz ;; esac)
+    (mkdir -p "$dest" && cd "$dest" && case $m in *xz) ar p "$f" "$m" | tar xJ ;; *) ar p "$f" "$m" | tar xz ;; esac)
   done
 }
 
@@ -47,6 +52,11 @@ if [ ! -f "$CACHE/.done-v2" ]; then
   fetch jessie $JESSIE
   touch "$CACHE/.done-v2"
 fi
+if [ ! -f "$CACHE/.done-gtk" ]; then
+  echo "fetching Debian 7 GTK headers into $CACHE/gtkroot"
+  DEST="$CACHE/gtkroot" fetch wheezy $WHEEZY
+  touch "$CACHE/.done-gtk"
+fi
 for l in libssl.so.60 libcrypto.so.57; do
   if [ -f "$KOLIBS/$l" ]; then cp "$KOLIBS/$l" "$CACHE/kindlelibs/"; fi
   [ -f "$CACHE/kindlelibs/$l" ] || { echo "need $l from KOReader (mount the Kindle or pass its koreader/libs path)"; exit 1; }
@@ -54,27 +64,34 @@ done
 ln -sf libssl.so.60 "$CACHE/kindlelibs/libssl.so"; ln -sf libcrypto.so.57 "$CACHE/kindlelibs/libcrypto.so"
 
 R="$CACHE/root"
+G="$CACHE/gtkroot"
 INC=""
 for d in usr/include/gtk-2.0 usr/lib/arm-linux-gnueabihf/gtk-2.0/include usr/include/gdk-pixbuf-2.0 \
          usr/include/pango-1.0 usr/include/cairo usr/include/atk-1.0 usr/include/glib-2.0 \
-         usr/lib/arm-linux-gnueabihf/glib-2.0/include usr/include/harfbuzz usr/include/freetype2 \
-         usr/include/pixman-1 usr/include/libpng16; do
-  INC="$INC -isystem $R/$d"
+         usr/lib/arm-linux-gnueabihf/glib-2.0/include usr/include/freetype2 \
+         usr/include/pixman-1 usr/include/libpng12; do
+  INC="$INC -isystem $G/$d"
 done
+# Headers are old (match the device's ABI); link against the sysroot libs, which only need the same
+# sonames. The device's own GTK/GLib are used at run time.
+GTKLIBS="-L$R/usr/lib/arm-linux-gnueabihf -L$R/lib/arm-linux-gnueabihf -lpcre"
 FLAGS="--target=arm-linux-gnueabihf --sysroot=$R --gcc-toolchain=$R/usr -mcpu=cortex-a7 -mfpu=neon-vfpv4
  -mfloat-abi=hard -fuse-ld=lld -B$LLD_DIR --rtlib=libgcc --unwindlib=libgcc --stdlib=libstdc++ -no-pie
- -std=c++14 -O2 -s -pthread -Wl,-dynamic-linker,/lib/ld-linux-armhf.so.3 -Wl,--as-needed -Wl,--allow-shlib-undefined
+ -std=c++14 -O2 -s -pthread -static-libstdc++ -Wl,-dynamic-linker,/lib/ld-linux-armhf.so.3 -Wl,--as-needed -Wl,--allow-shlib-undefined
  -L$CACHE/kindlelibs"
 CXX() { PATH="$LLD_DIR:$PATH" "$CLANGXX" $FLAGS "$@"; }
 
 OUT="$HERE/build-kindle"; mkdir -p "$OUT"
 cd "$HERE"
 CXX -o "$OUT/pomo-kndl-dev" src/dev_main.cpp src/core.cpp src/net.cpp -lssl -lcrypto -lpthread
-CXX -o "$OUT/pomo-kndl-gui" src/gui_main.cpp src/core.cpp src/net.cpp $INC \
-  -lgtk-x11-2.0 -lgdk-x11-2.0 -lgobject-2.0 -lglib-2.0 -lssl -lcrypto -lpthread -lpcre
+CXX -o "$OUT/pomo-kndl-gui" src/gui_main.cpp src/core.cpp src/net.cpp $INC $GTKLIBS \
+  -lgtk-x11-2.0 -lgdk-x11-2.0 -lgobject-2.0 -lglib-2.0 -lssl -lcrypto -lpthread
+# Plain-C GTK probe (KUAL "GTK probe") to separate toolchain problems from app problems.
+PATH="$LLD_DIR:$PATH" "${CLANGXX%++}" $(echo "$FLAGS" | sed 's/-std=c++14//; s/-static-libstdc++//; s/--stdlib=libstdc++//') \
+  -o "$OUT/gtk-probe" tests/gtk_probe.c $INC $GTKLIBS -lgtk-x11-2.0 -lgobject-2.0 -lglib-2.0
 
 rm -rf "$HERE/dist" && mkdir -p "$HERE/dist/pomo-kndl/bin"
-cp "$OUT/pomo-kndl-gui" "$OUT/pomo-kndl-dev" "$HERE/dist/pomo-kndl/bin/"
+cp "$OUT/pomo-kndl-gui" "$OUT/pomo-kndl-dev" "$OUT/gtk-probe" "$HERE/dist/pomo-kndl/bin/"
 cp "$HERE"/kual/* "$HERE/dist/pomo-kndl/"
 chmod +x "$HERE"/dist/pomo-kndl/*.sh "$HERE"/dist/pomo-kndl/bin/*
 echo "built: $HERE/dist/pomo-kndl"
