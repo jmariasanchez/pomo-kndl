@@ -83,7 +83,7 @@ pomo-kndl pair
 pomo-kndl serve
 ```
 
-Task entry, edits, ordering, archiving, and settings belong in the CLI. History shows completed tasks, actual focus minutes, and sessions per task. `status` shows the last landing, the plan version the Kindle carries, unreviewed log entries, and items awaiting `resolve`.
+History shows completed tasks, actual focus minutes, and sessions per task. `status` shows the last landing, the plan version the Kindle carries, unreviewed log entries, and items awaiting `resolve`.
 
 `serve` runs an explicitly started foreground sync listener. All other commands work against the local database without the Kindle. No background service installation is required for the first version.
 
