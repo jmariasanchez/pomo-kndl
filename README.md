@@ -148,6 +148,8 @@ The architecture still requires the computer to be awake with `pomo-kndl serve` 
 
 On 24 October 2026, inspection found that the mounted Kindle's saved host matched the Mac's current LAN IP and the listener was running. A deliberately unauthenticated probe passed the pinned TLS handshake and received the expected auth rejection. This checks the Mac endpoint and certificate, not connectivity from the Kindle over Wi-Fi. No real device credentials or flight log were sent, and the mounted device was not modified. The refreshed UI still needs an on-device touch/refresh check before calling this cleanup device-verified.
 
+The [acceptance recheck](docs/acceptance-2026-10-24.md) records actual native-window interaction, normal startup without test hooks, and public CLI/client/server round trips. It also records a later observation at 21:56:58 UTC that the real port-7419 listener was no longer running; its shutdown cause was not established, and it was not automatically restarted.
+
 ## Timer and tracking rules
 
 All timers run on the Kindle for the first version. The computer plans and reviews work; computer-side timers and remote timer controls are deferred. This keeps one session owner and avoids competing timers while disconnected.
