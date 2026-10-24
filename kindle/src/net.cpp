@@ -1,6 +1,8 @@
 #include "net.hpp"
 
 #include <netdb.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
@@ -10,6 +12,9 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <cerrno>
+#include <chrono>
+#include <climits>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -31,22 +36,55 @@ static std::string ssl_err(const char* what) {
 }
 
 static int connect_tcp(const std::string& host, int port, int timeout) {
+    if (timeout <= 0) throw std::runtime_error("timeout must be positive");
+    if (port < 1 || port > 65535) throw std::runtime_error("port must be between 1 and 65535");
     addrinfo hints{}, *res = nullptr;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0 || !res)
         throw std::runtime_error("cannot resolve " + host);
+    std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> addresses(res, freeaddrinfo);
+    using Clock = std::chrono::steady_clock;
+    // DNS is blocking. Start one shared connection budget only after resolution.
+    const auto deadline = Clock::now() + std::chrono::seconds(timeout);
     int fd = -1;
     for (addrinfo* a = res; a; a = a->ai_next) {
+        if (Clock::now() >= deadline) break;
         fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
         if (fd < 0) continue;
+        const int flags = fcntl(fd, F_GETFL, 0);
+        bool connected = false;
+        if (flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0) {
+            const int rc = connect(fd, a->ai_addr, a->ai_addrlen);
+            connected = rc == 0;
+            if (rc < 0 && (errno == EINPROGRESS || errno == EINTR)) {
+                while (true) {
+                    const auto now = Clock::now();
+                    if (now >= deadline) break;
+                    const auto remaining = deadline - now;
+                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count();
+                    // Round up so a fractional millisecond does not become a busy poll.
+                    ms = ms >= INT_MAX ? INT_MAX : ms + 1;
+                    pollfd pending{fd, POLLOUT, 0};
+                    const int ready = poll(&pending, 1, static_cast<int>(ms));
+                    if (ready < 0 && errno == EINTR) continue;
+                    if (ready == 0) continue;
+                    if (ready < 0) break;
+                    int error = 0;
+                    socklen_t len = sizeof error;
+                    connected = !(pending.revents & POLLNVAL) &&
+                        getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0;
+                    break;
+                }
+            }
+        }
         timeval tv{timeout, 0};
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        if (connect(fd, a->ai_addr, a->ai_addrlen) == 0) break;
+        if (connected && Clock::now() < deadline &&
+            fcntl(fd, F_SETFL, flags) == 0 &&
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv) == 0 &&
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv) == 0) break;
         close(fd);
         fd = -1;
     }
-    freeaddrinfo(res);
     if (fd < 0) throw std::runtime_error("computer unreachable at " + host + ":" + std::to_string(port));
     return fd;
 }
@@ -69,8 +107,10 @@ static std::string cert_sha256(X509* cert) {
 }
 
 nlohmann::json tls_exchange(const nlohmann::json& p, const nlohmann::json& req, int timeout) {
+    if (timeout <= 0) throw std::runtime_error("timeout must be positive");
     const std::string host = p.at("host"), pin = p.at("server_sha256");
     const int port = p.value("port", 7419);
+    if (port < 1 || port > 65535) throw std::runtime_error("port must be between 1 and 65535");
 
     std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> ctx(SSL_CTX_new(SSLv23_client_method()), SSL_CTX_free);
     if (!ctx) throw std::runtime_error(ssl_err("SSL_CTX_new"));
