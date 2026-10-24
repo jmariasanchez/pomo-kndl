@@ -52,6 +52,17 @@ if [ ! -f "$CACHE/.done-v2" ]; then
   fetch jessie $JESSIE
   touch "$CACHE/.done-v2"
 fi
+# Debian dev symlinks are absolute (/lib/...). Make them sysroot-relative, and never let the
+# linker fall back to static GLib archives: a private static GLib next to the device's shared one
+# breaks g_once_init/type registration and crashes GTK at startup.
+find "$CACHE/root" -type l -lname '/*' | while read -r l; do
+  t=$(readlink "$l")
+  case "$t" in "$CACHE/root"/*) continue ;; esac
+  if [ -e "$CACHE/root$t" ]; then ln -sf "$CACHE/root$t" "$l"; fi
+done
+find "$CACHE/root" "$CACHE/gtkroot" -name 'lib*.a' \( -name 'libglib*' -o -name 'libgobject*' -o -name 'libgio*' \
+  -o -name 'libgmodule*' -o -name 'libgthread*' -o -name 'libgtk*' -o -name 'libgdk*' -o -name 'libpango*' \
+  -o -name 'libcairo*' -o -name 'libatk*' \) -exec rm -f {} + 2>/dev/null || true
 if [ ! -f "$CACHE/.done-gtk" ]; then
   echo "fetching Debian 7 GTK headers into $CACHE/gtkroot"
   DEST="$CACHE/gtkroot" fetch wheezy $WHEEZY
@@ -91,6 +102,13 @@ PATH="$LLD_DIR:$PATH" "${CLANGXX%++}" $(echo "$FLAGS" | sed 's/-std=c++14//; s/-
   -o "$OUT/gtk-probe" tests/gtk_probe.c $INC $GTKLIBS -lgtk-x11-2.0 -lgobject-2.0 -lglib-2.0
 
 rm -rf "$HERE/dist" && mkdir -p "$HERE/dist/pomo-kndl/bin"
+# Guard: GLib/GObject must come from the device, never be embedded in our binaries.
+READELF="${READELF:-$(nix build --no-link --print-out-paths nixpkgs#binutils-unwrapped)/bin/readelf}"
+for b in pomo-kndl-gui gtk-probe; do
+  if "$READELF" --dyn-syms -W "$OUT/$b" | awk '$7 != "UND"' | grep -qE ' g_(once_init_leave|type_register_static|object_new)$'; then
+    echo "ERROR: $b embeds GLib/GObject code (static link); refusing to package"; exit 1
+  fi
+done
 cp "$OUT/pomo-kndl-gui" "$OUT/pomo-kndl-dev" "$OUT/gtk-probe" "$HERE/dist/pomo-kndl/bin/"
 cp "$HERE"/kual/* "$HERE/dist/pomo-kndl/"
 chmod +x "$HERE"/dist/pomo-kndl/*.sh "$HERE"/dist/pomo-kndl/bin/*
