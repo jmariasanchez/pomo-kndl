@@ -34,12 +34,12 @@ gui: $(BUILD)
 # Cross build for the Kindle (armhf). Example:
 #   make kindle CROSS=arm-kindlehf-linux-gnueabihf- SYSROOT=$$HOME/x-tools/arm-kindlehf-linux-gnueabihf/arm-kindlehf-linux-gnueabihf/sysroot
 kindle:
-	$(MAKE) gui CXX=$(CROSS)g++ OPENSSL_PREFIX= \
+	$(MAKE) gui dev CXX=$(CROSS)g++ OPENSSL_PREFIX= \
 	  PKG_CONFIG_SYSROOT_DIR=$(SYSROOT) PKG_CONFIG_LIBDIR=$(SYSROOT)/usr/lib/pkgconfig BUILD=build-kindle
 
 package: kindle
 	rm -rf dist && mkdir -p dist/pomo-kndl/bin
-	cp build-kindle/pomo-kndl-gui dist/pomo-kndl/bin/
+	cp build-kindle/pomo-kndl-gui build-kindle/pomo-kndl-dev dist/pomo-kndl/bin/
 	cp kual/config.xml kual/menu.json kual/run.sh dist/pomo-kndl/
 	cd dist && tar czf pomo-kndl-kual.tgz pomo-kndl
 

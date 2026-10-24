@@ -1,6 +1,6 @@
 # pomo-kndl
 
-Status: planning. No application built or installed.
+Status: first build. The CLI, sync engine, and Kindle app run and are tested on macOS. Not yet cross-compiled or run on the Kindle.
 
 A quiet Kindle focus timer driven by a portable Rust CLI. The computer is the airport: it holds the authoritative state and runs operations. The Kindle is the airplane: it departs with a flight plan, works on its own while disconnected, and lands with a flight log that the computer reconciles.
 
@@ -10,7 +10,36 @@ A quiet Kindle focus timer driven by a portable Rust CLI. The computer is the ai
 - The Kindle runs a native C++ and GTK 2 application, launched through KUAL on a jailbroken device. It is the visual interface for tasks, timer, break, and completion.
 - The computer is the head of operations. The Kindle carries what it needs, keeps working offline, and reports back.
 - Local work needs no internet. Each device saves its own changes durably before reporting success.
-- Plan first. This repository currently contains documentation only.
+
+## Quick start
+
+```sh
+# Computer (Rust 1.80+)
+cd cli && cargo build --release
+./target/release/pomo-kndl add "Write project outline"
+./target/release/pomo-kndl pair --host <this-computer-LAN-ip>   # writes pairing.json
+./target/release/pomo-kndl serve                                 # foreground TLS listener, port 7419
+
+# Kindle app on the host, for development (needs openssl@3, and gtk+ 2 for the GUI)
+cd kindle && make test dev gui
+POMO_KNDL_DIR=/path/with/pairing.json ./build/pomo-kndl-gui
+
+# End-to-end check: real Rust server + C++ client over pinned TLS
+./tests/e2e.sh
+```
+
+Kindle install (not yet verified on device): cross-compile with an armhf Kindle toolchain (`make -C kindle package CROSS=... SYSROOT=...`), copy `dist/pomo-kndl/` to `/mnt/us/extensions/`, add `pairing.json` to that folder over USB, then open pomo-kndl from KUAL. The device must provide or bundle GTK 2 and OpenSSL libraries (`lib/` in the extension folder is on the library path).
+
+The wire format is in [PROTOCOL.md](PROTOCOL.md).
+
+## Layout
+
+- `cli/` Rust CLI: SQLite database, landing engine, TLS `serve`, `pair`.
+- `kindle/src/core.*` C++ state, flight log, timer, atomic saves. No GTK or network.
+- `kindle/src/net.*` pinned TLS client (OpenSSL).
+- `kindle/src/gui_main.cpp` GTK 2 UI. `dev_main.cpp` headless driver used by tests and the KUAL "Sync now" item.
+- `kindle/kual/` KUAL extension files.
+- `tests/e2e.sh` end-to-end sync test.
 
 ## Minimal Kindle UI
 
@@ -35,7 +64,7 @@ Use a minute-level countdown and redraw only changed regions with e-ink-appropri
 
 ## Computer workflow
 
-Proposed commands, subject to implementation:
+Commands are implemented. Task IDs accept any unique prefix. Task entry, edits, ordering, archiving, and settings belong in the CLI.
 
 ```sh
 pomo-kndl add "Write project outline"
@@ -45,10 +74,11 @@ pomo-kndl tasks
 pomo-kndl done <task-id>
 pomo-kndl reopen <task-id>
 pomo-kndl archive <task-id>
-pomo-kndl config focus=25 break=5
+pomo-kndl config --focus 25 --break 5
 pomo-kndl history
 pomo-kndl status
-pomo-kndl resolve <task-id>
+pomo-kndl resolve <task-id> --kindle|--keep
+pomo-kndl plan
 pomo-kndl pair
 pomo-kndl serve
 ```

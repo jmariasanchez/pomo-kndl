@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "name": "pomo-kndl",
+      "priority": 0,
+      "items": [
+        { "name": "Open pomo-kndl", "priority": 1, "action": "./run.sh", "params": "", "exitmenu": true },
+        { "name": "Sync now (headless)", "priority": 2, "action": "./run.sh", "params": "sync", "exitmenu": false }
+      ]
+    }
+  ]
+}
