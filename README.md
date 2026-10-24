@@ -2,11 +2,11 @@
 
 A quiet Kindle focus timer driven by a portable Rust CLI. The computer is the airport: it holds the authoritative state and runs operations. The Kindle is the airplane: it departs with a flight plan, works on its own while disconnected, and lands with a flight log that the computer reconciles.
 
-![Task list, focus, end of session, and break on a Paperwhite 5](docs/screens/overview.png)
+![Task list, focus, end of session, and break: host previews at Paperwhite 5 proportions](docs/screens/overview.png)
 
 ## Status (24 October 2026)
 
-Working end to end on a Paperwhite 5 Signature Edition (firmware 5.18.5.0.1, KOReader v2026.03, KUAL): the GTK 2 app launches from KUAL, runs the timer offline, and syncs with this Mac over pinned TLS.
+The earlier version worked end to end on a Paperwhite 5 Signature Edition (firmware 5.18.5.0.1, KOReader v2026.03, KUAL): KUAL launch, offline timer, and pinned-TLS sync with this Mac. The updated UI is installed and checksum-verified; the device log records a post-install launcher invocation and GUI exit 0. Its screen, touch behavior and successful Wi-Fi sync still need direct confirmation. See [acceptance evidence](docs/acceptance-2026-10-24.md) for the whole-result recheck and remaining runtime boundary.
 
 | Area | State | Evidence |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Working end to end on a Paperwhite 5 Signature Edition (firmware 5.18.5.0.1, KOR
 | Pinned TLS + pairing | Done | e2e: wrong pin and bad token refused |
 | Kindle core (state, timer, crash/reboot recovery) | Done | 7 C++ tests with a fake clock |
 | Kindle cross build | Done | `kindle/cross.sh`, `tests/kindle-vm.sh` (ARM VM, glibc 2.19) |
-| Kindle GTK 2 UI | Updated package installed; new on-device launch check pending | native GTK workflow/layout checks, ARM VM sync, and installed-file checksum verification; screenshots in `docs/screens/` |
+| Kindle GTK 2 UI | Updated package installed; device log records launch/exit 0; screen/touch check pending | native GTK workflow/layout checks, ARM VM sync, device launcher log and installed-file checksums; host screenshots in `docs/screens/` |
 | Install on Mac as a command | Not yet | run from `cli/target/release` |
 | Linux and Windows CLI | Not checked | |
 | Sleep/resume, Wi-Fi after wake, battery, e-ink refresh tuning | Not measured | needs on-device sessions |
