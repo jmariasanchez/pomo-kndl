@@ -15,12 +15,14 @@ Working end to end on a Paperwhite 5 Signature Edition (firmware 5.18.5.0.1, KOR
 | Pinned TLS + pairing | Done | e2e: wrong pin and bad token refused |
 | Kindle core (state, timer, crash/reboot recovery) | Done | 7 C++ tests with a fake clock |
 | Kindle cross build | Done | `kindle/cross.sh`, `tests/kindle-vm.sh` (ARM VM, glibc 2.19) |
-| Kindle GTK 2 UI | Original version running on device; cleanup tested on host | native GTK workflow/layout checks in `tests/ui.sh`; screenshots in `docs/screens/` |
+| Kindle GTK 2 UI | Updated package installed; new on-device launch check pending | native GTK workflow/layout checks, ARM VM sync, and installed-file checksum verification; screenshots in `docs/screens/` |
 | Install on Mac as a command | Not yet | run from `cli/target/release` |
 | Linux and Windows CLI | Not checked | |
 | Sleep/resume, Wi-Fi after wake, battery, e-ink refresh tuning | Not measured | needs on-device sessions |
 
 Known limits: `serve` handles one connection at a time (fine for one Kindle). The Kindle app needs KOReader installed for its TLS library. A reboot during focus pauses the session instead of counting the unknown gap.
+
+Installation update, 24 October 2026 at 22:03 UTC: cross-built source revision `5323558` on the Mac and installed the ARM binaries plus KUAL launcher/config on the physical Kindle. All six installed files matched the build, and every other existing extension file, including pairing and task state, matched the pre-install backup. The Kindle was safely ejected. Rollback backup: `~/Library/Application Support/pomo-kndl/backups/20261024-NjYqvg/`. Open **KUAL > pomo-kndl > Open pomo-kndl** to check the new build on-device; installation verification is not a claim that the updated UI has already run on the physical screen.
 
 ## Direction
 

@@ -46,3 +46,16 @@ A later read-only check at **2026-10-24 21:56:58 UTC** found **no listener on po
 - All test-only GUI/server processes were stopped. The user's active application was left undisturbed at cleanup. The device's installed application, pairing and task state were not changed.
 
 The host application and real integration boundaries have concrete passing observations. Physical-device acceptance and the user's aesthetic approval remain unverified, so the overall feedback loop is representative, not closed end-to-end on the target device.
+
+## Later authorized installation
+
+After the recheck, the user explicitly requested a build and installation on the Kindle. At approximately 22:03 UTC on 24 October 2026:
+
+- Freshly cross-built revision `5323558` for ARM hard-float on the Mac. Packaging passed the dynamic GTK/GLib check, and the ARM VM passed state, first landing, and offline-work/reconnect checks.
+- Copied the entire existing extension into owner-private local backup storage and verified it byte-for-byte before changing the device: `~/Library/Application Support/pomo-kndl/backups/20261024-NjYqvg/app/`.
+- Staged and installed exactly six package files: `bin/pomo-kndl-gui`, `bin/pomo-kndl-dev`, `bin/gtk-probe`, `config.xml`, `menu.json`, and `run.sh`. Independently read back all six SHA-256 checksums and confirmed they matched the build.
+- Verified every existing non-package file against the backup, including `pairing.json`, `state.json`, runtime libraries and logs. They were unchanged. Verified that the GUI binary differs from the previous installation.
+- Installed GUI SHA-256: `18738b9b4a2eae597bc64a665472b8835e9fc4d1d4ca9f83d766638cb9d7160a`.
+- Flushed writes and safely ejected the Kindle using `diskutil eject`. No physical KUAL launch or touch/e-ink/Wi-Fi observation was possible from the USB installation path. That runtime acceptance remains pending.
+
+The Mac's port-7419 listener was still absent at installation verification. It was not restarted as part of the device installation. The installed app can work offline; LAN sync still requires the paired computer's `serve` process.
