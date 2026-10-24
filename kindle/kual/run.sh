@@ -36,5 +36,9 @@ case "$1" in
     exit 0 ;;
 esac
 
-"$DIR/bin/pomo-kndl-gui" >>"$LOG" 2>&1
-echo "gui exit $?" >>"$LOG"
+export DISPLAY="${DISPLAY:-:0}"
+# Detach so KUAL closing does not take the app with it.
+(
+  "$DIR/bin/pomo-kndl-gui" >>"$LOG" 2>&1
+  echo "gui exit $?" >>"$LOG"
+) </dev/null >/dev/null 2>&1 &

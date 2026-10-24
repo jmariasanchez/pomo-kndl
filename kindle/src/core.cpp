@@ -13,9 +13,20 @@
 
 namespace pk {
 
+static uint64_t seed64() {
+    // Avoid std::random_device: GCC 6's libstdc++ throws if its device is unavailable.
+    uint64_t s = 0;
+    if (FILE* f = fopen("/dev/urandom", "rb")) {
+        if (fread(&s, sizeof s, 1, f) != 1) s = 0;
+        fclose(f);
+    }
+    timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return s ^ ((uint64_t)time(nullptr) << 32) ^ (uint64_t)ts.tv_nsec ^ ((uint64_t)getpid() << 16);
+}
+
 std::string uuid4() {
-    static std::random_device rd;
-    static std::mt19937_64 g(((uint64_t)rd() << 32) ^ rd() ^ (uint64_t)time(nullptr));
+    static std::mt19937_64 g(seed64());
     uint64_t a = g(), b = g();
     a = (a & 0xffffffffffff0fffULL) | 0x0000000000004000ULL;
     b = (b & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;

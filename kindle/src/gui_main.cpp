@@ -240,8 +240,9 @@ int main(int argc, char** argv) {
     U.sync_msg = U.app->pending_entries() ? "pending" : U.app->last_sync();
 
     U.win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    // Kindle window manager placement hint: fullscreen application layer.
-    gtk_window_set_title(GTK_WINDOW(U.win), "L:A_N:application_ID:pomo-kndl_PC:N_O:URL");
+    // Kindle window manager (awesome) reads placement from the title: app layer, application role,
+    // Kindle top bar (PC:T), id without underscores, portrait (O:U).
+    gtk_window_set_title(GTK_WINDOW(U.win), "L:A_N:application_PC:T_ID:com.pomokndl.app_O:U");
     GdkScreen* scr = gdk_screen_get_default();
     gtk_window_set_default_size(GTK_WINDOW(U.win), gdk_screen_get_width(scr), gdk_screen_get_height(scr));
     GdkColor white;
